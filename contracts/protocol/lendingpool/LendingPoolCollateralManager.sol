@@ -79,7 +79,7 @@ contract LendingPoolCollateralManager is
    * to receive the underlying collateral asset directly
    **/
   function liquidationCall(
-    address collateralAsset,
+    address collateralAsset, //Only liquidating one debt/collateral asset pair at a time?
     address debtAsset,
     address user,
     uint256 debtToCover,
@@ -100,8 +100,10 @@ contract LendingPoolCollateralManager is
       _addressesProvider.getPriceOracle()
     );
 
+    //Oh boy 2 types of debt at once. Stable debt logic might be aids
     (vars.userStableDebt, vars.userVariableDebt) = Helpers.getUserCurrentDebt(user, debtReserve);
 
+    //All require checks go into this essentially
     (vars.errorCode, vars.errorMsg) = ValidationLogic.validateLiquidationCall(
       collateralReserve,
       debtReserve,
@@ -111,6 +113,7 @@ contract LendingPoolCollateralManager is
       vars.userVariableDebt
     );
 
+    //check all them errors at once
     if (Errors.CollateralManagerErrors(vars.errorCode) != Errors.CollateralManagerErrors.NO_ERROR) {
       return (vars.errorCode, vars.errorMsg);
     }
@@ -123,6 +126,7 @@ contract LendingPoolCollateralManager is
       LIQUIDATION_CLOSE_FACTOR_PERCENT
     );
 
+    //Looks like aave lets you liquidate at any percentage up to 50% the same way we were thinking in wise lending
     vars.actualDebtToLiquidate = debtToCover > vars.maxLiquidatableDebt
       ? vars.maxLiquidatableDebt
       : debtToCover;
@@ -139,6 +143,10 @@ contract LendingPoolCollateralManager is
       vars.userCollateralBalance
     );
 
+    //@bruknote: This check exists because we only do one collat/debt asset pair against each other liquidating. Because of that
+    // its possible for the user to be collateralizing their debt with many assets, hence any individual one not having enough value to fully cover the 50% liquidation position
+    // I think this also means that liquidations less than 50% can essentially be forced by having collat spread evenly into 3+ tokens (if only 1 debt token, this gets more
+    // complex with more debt tokens)
     // If debtAmountNeeded < actualDebtToLiquidate, there isn't enough
     // collateral to cover the actual amount that is being liquidated, hence we liquidate
     // a smaller amount
@@ -149,10 +157,15 @@ contract LendingPoolCollateralManager is
 
     // If the liquidator reclaims the underlying asset, we make sure there is enough available liquidity in the
     // collateral reserve
+    //THE OPTION TO RECIEVE ATOKEN IS ALREADY BUILT INTO LIQUIDATION.
+    //Relevant for when swap pools cause lockup, also means this protects against general aave lockups in a generic case
     if (!receiveAToken) {
       uint256 currentAvailableCollateral =
         IERC20(collateralAsset).balanceOf(address(vars.collateralAtoken));
+      //Just straight fail out if someone is attempting this eh?
       if (currentAvailableCollateral < vars.maxCollateralToLiquidate) {
+        //Return errors to somewhere else instead of revert, wonder where that is
+        //Or maybe no state updates have occured so just exit the program here? Interesting practice
         return (
           uint256(Errors.CollateralManagerErrors.NOT_ENOUGH_LIQUIDITY),
           Errors.LPCM_NOT_ENOUGH_LIQUIDITY_TO_LIQUIDATE
@@ -160,8 +173,11 @@ contract LendingPoolCollateralManager is
       }
     }
 
+    //Is this our first state update? Interesting that aave doesnt seem to want to have reverts in this function despit it being external and nothing above it
+    //So I guess everything from here should execute errorless
     debtReserve.updateState();
 
+    //Prefers to liquidate variable debt it seems
     if (vars.userVariableDebt >= vars.actualDebtToLiquidate) {
       IVariableDebtToken(debtReserve.variableDebtTokenAddress).burn(
         user,
