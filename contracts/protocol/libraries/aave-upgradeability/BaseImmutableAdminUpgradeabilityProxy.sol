@@ -31,6 +31,8 @@ contract BaseImmutableAdminUpgradeabilityProxy is BaseUpgradeabilityProxy {
   /**
    * @return The address of the proxy admin.
    */
+  //I guess this avoid being a view in order to keep delegating working?
+  //If I am admin I can see that I am admin - lmao
   function admin() external ifAdmin returns (address) {
     return ADMIN;
   }

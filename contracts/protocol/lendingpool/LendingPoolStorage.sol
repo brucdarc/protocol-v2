@@ -22,6 +22,7 @@ contract LendingPoolStorage {
 
   uint256 internal _reservesCount;
 
+  //Paused here is for the whole system. Individual reserves can be deactivated/frozen
   bool internal _paused;
 
   uint256 internal _maxStableRateBorrowSizePercent;

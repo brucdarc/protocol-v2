@@ -123,6 +123,7 @@ library ReserveLogic {
         lastUpdatedTimestamp
       );
 
+    //Treasure minted to every time interest is accumulated
     _mintToTreasury(
       reserve,
       scaledVariableDebt,
@@ -170,7 +171,7 @@ library ReserveLogic {
   ) external {
     require(reserve.aTokenAddress == address(0), Errors.RL_RESERVE_ALREADY_INITIALIZED);
 
-    reserve.liquidityIndex = uint128(WadRayMath.ray());
+    reserve.liquidityIndex = uint128(WadRayMath.ray()); //indexes start at 1
     reserve.variableBorrowIndex = uint128(WadRayMath.ray());
     reserve.aTokenAddress = aTokenAddress;
     reserve.stableDebtTokenAddress = stableDebtTokenAddress;
@@ -271,6 +272,7 @@ library ReserveLogic {
    * @param newLiquidityIndex The new liquidity index
    * @param newVariableBorrowIndex The variable borrow index after the last accumulation of the interest
    **/
+  //Takes a constant percentage of the interest on the debt defined by the reserve factor
   function _mintToTreasury(
     DataTypes.ReserveData storage reserve,
     uint256 scaledVariableDebt,
@@ -311,6 +313,7 @@ library ReserveLogic {
     vars.previousStableDebt = vars.principalStableDebt.rayMul(vars.cumulatedStableInterest);
 
     //debt accrued is the sum of the current debt minus the sum of the debt at the last update
+    //Aka just the new debt. "Debt accrued" aka new debt at this update, treasury only get percent of new debt from interest added
     vars.totalDebtAccrued = vars
       .currentVariableDebt
       .add(vars.currentStableDebt)
@@ -331,6 +334,8 @@ library ReserveLogic {
    * @param liquidityIndex The last stored liquidity index
    * @param variableBorrowIndex The last stored variable borrow index
    **/
+  //AKA "Accumulate Interest"
+  //Would be a good alternate name for this function
   function _updateIndexes(
     DataTypes.ReserveData storage reserve,
     uint256 scaledVariableDebt,

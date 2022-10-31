@@ -18,6 +18,8 @@ library MathUtils {
    * @return The interest rate linearly accumulated during the timeDelta, in ray
    **/
 
+  //The reason we can do this and not try and do actual exponential math on the second order for compounding, is that the
+  //rate essentially gets compounded every time there is an interaction with the pool and the rate gets updated.
   function calculateLinearInterest(uint256 rate, uint40 lastUpdateTimestamp)
     internal
     view
@@ -42,6 +44,10 @@ library MathUtils {
    * @param lastUpdateTimestamp The timestamp of the last update of the interest
    * @return The interest rate compounded during the timeDelta, in ray
    **/
+
+  //So essentially compounding on a per second basis, using the first 3 elements of a series approximation instead of exponent math
+  //Better or worse than tablemath? -Future bruk here, completely different math equation idiot
+
   function calculateCompoundedInterest(
     uint256 rate,
     uint40 lastUpdateTimestamp,

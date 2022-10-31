@@ -26,6 +26,7 @@ library Helpers {
     );
   }
 
+  //Shouldnt solidity just convert storage to memory for another call if it happens? Seem weird that this is needed. Maybe fixed in later solidity versions?
   function getUserCurrentDebtMemory(address user, DataTypes.ReserveData memory reserve)
     internal
     view

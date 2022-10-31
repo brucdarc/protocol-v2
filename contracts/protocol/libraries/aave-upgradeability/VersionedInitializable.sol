@@ -30,6 +30,11 @@ abstract contract VersionedInitializable {
    * @dev Modifier to use in the initializer function of a contract.
    */
   modifier initializer() {
+    //Uses the getRevision function to actually decide on important logic here, take note
+    //Instead of flipping a bool for initializing, we look at a numbering system here. So theoretically a contract could be reinitialized without a new
+    //Implementation here.
+    //I guess the data of any bool in storage would be kept also, so that would cause problems with the proxy model
+    //DUH DUH THIS IS WHY FILE CALLED VERSIONED INITIALIZABLE DUH DUH
     uint256 revision = getRevision();
     require(
       initializing || isConstructor() || revision > lastInitializedRevision,

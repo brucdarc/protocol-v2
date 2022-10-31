@@ -25,7 +25,7 @@ library GenericLogic {
   using ReserveConfiguration for DataTypes.ReserveConfigurationMap;
   using UserConfiguration for DataTypes.UserConfigurationMap;
 
-  uint256 public constant HEALTH_FACTOR_LIQUIDATION_THRESHOLD = 1 ether;
+  uint256 public constant HEALTH_FACTOR_LIQUIDATION_THRESHOLD = 1 ether; //Just say 1e18 aaaaaa
 
   struct balanceDecreaseAllowedLocalVars {
     uint256 decimals;
@@ -52,6 +52,7 @@ library GenericLogic {
    * @param oracle The address of the oracle contract
    * @return true if the decrease of the balance is allowed
    **/
+  //Used for 2 actions, withdraw and unset reserve as collateral
   function balanceDecreaseAllowed(
     address asset,
     address user,
@@ -95,6 +96,7 @@ library GenericLogic {
     vars.collateralBalanceAfterDecrease = vars.totalCollateralInETH.sub(vars.amountToDecreaseInETH);
 
     //if there is a borrow, there can't be 0 collateral
+    //Also were about to divide by this variable
     if (vars.collateralBalanceAfterDecrease == 0) {
       return false;
     }
@@ -226,7 +228,7 @@ library GenericLogic {
     return (
       vars.totalCollateralInETH,
       vars.totalDebtInETH,
-      vars.avgLtv,
+      vars.avgLtv, //Used for validate borrow
       vars.avgLiquidationThreshold,
       vars.healthFactor
     );
@@ -244,6 +246,8 @@ library GenericLogic {
     uint256 totalDebtInETH,
     uint256 liquidationThreshold
   ) internal pure returns (uint256) {
+    //Seems unecessary since we already check the user bitmap to see if theyre borrowing anything at the start of balance decrease allowed.
+    //Maybe this also gets called into elsewhere outside this file since its a library?
     if (totalDebtInETH == 0) return uint256(-1);
 
     return (totalCollateralInETH.percentMul(liquidationThreshold)).wadDiv(totalDebtInETH);

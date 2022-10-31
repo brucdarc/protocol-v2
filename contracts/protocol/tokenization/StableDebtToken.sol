@@ -153,6 +153,10 @@ contract StableDebtToken is IStableDebtToken, DebtTokenBase {
 
     vars.amountInRay = amount.wadToRay();
 
+    //The old rate scaled by the old amount, plus the new rate scaled by the new amount
+    // ((Rate * oldmoney) + (newmoney * newrate)) / totalmoney
+    // Technically this seems to give the user a bit better of a deal than they should have gotten in all cases
+    // See scratch notes @ BRUKNOTE
     vars.newStableRate = _usersStableRate[onBehalfOf]
       .rayMul(currentBalance.wadToRay())
       .add(vars.amountInRay.rayMul(rate))
@@ -165,6 +169,8 @@ contract StableDebtToken is IStableDebtToken, DebtTokenBase {
     _totalSupplyTimestamp = _timestamps[onBehalfOf] = uint40(block.timestamp);
 
     // Calculates the updated average stable rate
+    //(currentrate * prevSupply + rate * amount) / nextSupply
+    //So it just scales the new debt by a new rate provided by the lendingPool
     vars.currentAvgStableRate = _avgStableRate = vars
       .currentAvgStableRate
       .rayMul(vars.previousSupply.wadToRay())
@@ -281,7 +287,7 @@ contract StableDebtToken is IStableDebtToken, DebtTokenBase {
 
     return (
       previousPrincipalBalance,
-      previousPrincipalBalance.add(balanceIncrease),
+      previousPrincipalBalance.add(balanceIncrease), //THis is just the same as balanceOf(user)
       balanceIncrease
     );
   }

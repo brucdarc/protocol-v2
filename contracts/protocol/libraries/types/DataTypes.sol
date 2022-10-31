@@ -36,7 +36,7 @@ library DataTypes {
     //bit 57: reserve is frozen
     //bit 58: borrowing is enabled
     //bit 59: stable rate borrowing enabled
-    //bit 60-63: reserved
+    //bit 60-63: reserved    Lmao they just wanted to start the next one at 64
     //bit 64-79: reserve factor
     uint256 data;
   }
@@ -45,5 +45,6 @@ library DataTypes {
     uint256 data;
   }
 
+  //None? Does that mean no borrows?
   enum InterestRateMode {NONE, STABLE, VARIABLE}
 }

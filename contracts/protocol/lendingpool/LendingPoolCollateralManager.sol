@@ -63,6 +63,7 @@ contract LendingPoolCollateralManager is
    * of the LendingPool contract, the getRevision() function is needed, but the value is not
    * important, as the initialize() function will never be called here
    */
+  //Lmao
   function getRevision() internal pure override returns (uint256) {
     return 0;
   }
@@ -78,6 +79,7 @@ contract LendingPoolCollateralManager is
    * @param receiveAToken `true` if the liquidators wants to receive the collateral aTokens, `false` if he wants
    * to receive the underlying collateral asset directly
    **/
+  //Did you just assume the liquidators gender?
   function liquidationCall(
     address collateralAsset, //Only liquidating one debt/collateral asset pair at a time?
     address debtAsset,
@@ -100,10 +102,10 @@ contract LendingPoolCollateralManager is
       _addressesProvider.getPriceOracle()
     );
 
-    //Oh boy 2 types of debt at once. Stable debt logic might be aids
     (vars.userStableDebt, vars.userVariableDebt) = Helpers.getUserCurrentDebt(user, debtReserve);
 
     //All require checks go into this essentially
+    //Check health factor, reserve is a collaterall reserve of the user, is active, yeah
     (vars.errorCode, vars.errorMsg) = ValidationLogic.validateLiquidationCall(
       collateralReserve,
       debtReserve,
@@ -127,6 +129,7 @@ contract LendingPoolCollateralManager is
     );
 
     //Looks like aave lets you liquidate at any percentage up to 50% the same way we were thinking in wise lending
+    //raw value not percent also so if want maximum just set debtocover to the max amount before calling
     vars.actualDebtToLiquidate = debtToCover > vars.maxLiquidatableDebt
       ? vars.maxLiquidatableDebt
       : debtToCover;
@@ -151,6 +154,7 @@ contract LendingPoolCollateralManager is
     // collateral to cover the actual amount that is being liquidated, hence we liquidate
     // a smaller amount
 
+    //So debtAmountNeeded is literally useless, could just set actualDebtToLiquidate to it immediately
     if (vars.debtAmountNeeded < vars.actualDebtToLiquidate) {
       vars.actualDebtToLiquidate = vars.debtAmountNeeded;
     }
@@ -175,6 +179,8 @@ contract LendingPoolCollateralManager is
 
     //Is this our first state update? Interesting that aave doesnt seem to want to have reverts in this function despit it being external and nothing above it
     //So I guess everything from here should execute errorless
+
+    //THIS IS LIKE THE ONE function TO ADD INTEREST
     debtReserve.updateState();
 
     //Prefers to liquidate variable debt it seems
@@ -193,6 +199,7 @@ contract LendingPoolCollateralManager is
           debtReserve.variableBorrowIndex
         );
       }
+      //So it seems stable and variable debt tokens are different tokens, managed by different contracts
       IStableDebtToken(debtReserve.stableDebtTokenAddress).burn(
         user,
         vars.actualDebtToLiquidate.sub(vars.userVariableDebt)
@@ -285,6 +292,10 @@ contract LendingPoolCollateralManager is
    *                           (user balance, close factor)
    *         debtAmountNeeded: The amount to repay with the liquidation
    **/
+  //So I believe this is mainly just
+  //Figuring out the price correspondence between debt/collat prices
+  //Checking the users max collat balance, and if the amount of collat required exceeds it, readjusting to take the max collat (Of this collat token)
+  //User has
   function _calculateAvailableCollateralToLiquidate(
     DataTypes.ReserveData storage collateralReserve,
     DataTypes.ReserveData storage debtReserve,
@@ -302,6 +313,7 @@ contract LendingPoolCollateralManager is
     vars.collateralPrice = oracle.getAssetPrice(collateralAsset);
     vars.debtAssetPrice = oracle.getAssetPrice(debtAsset);
 
+    //Liquidation bonus might not be the same for all assets? Incentivized individually?
     (, , vars.liquidationBonus, vars.collateralDecimals, ) = collateralReserve
       .configuration
       .getParams();
@@ -318,6 +330,7 @@ contract LendingPoolCollateralManager is
 
     if (vars.maxAmountCollateralToLiquidate > userCollateralBalance) {
       collateralAmount = userCollateralBalance;
+      //Should logically only change debtAmountNeeded if its getting lower, because of its dependence on vars.maxAmountCollateralToLiquidate
       debtAmountNeeded = vars
         .collateralPrice
         .mul(collateralAmount)

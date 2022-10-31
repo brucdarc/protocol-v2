@@ -128,7 +128,7 @@ contract DefaultReserveInterestRateStrategy is IReserveInterestRateStrategy {
     )
   {
     uint256 availableLiquidity = IERC20(reserve).balanceOf(aToken);
-    //avoid stack too deep
+    //avoid stack too deep - lmao I feel that
     availableLiquidity = availableLiquidity.add(liquidityAdded).sub(liquidityTaken);
 
     return
@@ -186,6 +186,7 @@ contract DefaultReserveInterestRateStrategy is IReserveInterestRateStrategy {
     vars.currentStableBorrowRate = 0;
     vars.currentLiquidityRate = 0;
 
+    //Ternary statement make avoid kaboom
     vars.utilizationRate = vars.totalDebt == 0
       ? 0
       : vars.totalDebt.rayDiv(availableLiquidity.add(vars.totalDebt));
@@ -206,10 +207,10 @@ contract DefaultReserveInterestRateStrategy is IReserveInterestRateStrategy {
       );
     } else {
       vars.currentStableBorrowRate = vars.currentStableBorrowRate.add(
-        _stableRateSlope1.rayMul(vars.utilizationRate.rayDiv(OPTIMAL_UTILIZATION_RATE))
+        _stableRateSlope1.rayMul(vars.utilizationRate.rayDiv(OPTIMAL_UTILIZATION_RATE)) //WHY FUCKING DO THESE DIFFERENTLy
       );
       vars.currentVariableBorrowRate = _baseVariableBorrowRate.add(
-        vars.utilizationRate.rayMul(_variableRateSlope1).rayDiv(OPTIMAL_UTILIZATION_RATE)
+        vars.utilizationRate.rayMul(_variableRateSlope1).rayDiv(OPTIMAL_UTILIZATION_RATE) //<----------
       );
     }
 

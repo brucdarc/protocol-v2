@@ -30,7 +30,10 @@ library ValidationLogic {
   using ReserveConfiguration for DataTypes.ReserveConfigurationMap;
   using UserConfiguration for DataTypes.UserConfigurationMap;
 
-  uint256 public constant REBALANCE_UP_LIQUIDITY_RATE_THRESHOLD = 4000;
+  //Hmm docs say this value is supposed to be 25% and its a 40% right here. Whats up with that?
+  //40% is considered high enough rate to attrack depositors
+  //Maybe they upgraded this implemenation later and changed 40% to 25%?
+  uint256 public constant REBALANCE_UP_LIQUIDITY_RATE_THRESHOLD = 4000; //This is value e4 as percentage I believe. 40%?
   uint256 public constant REBALANCE_UP_USAGE_RATIO_THRESHOLD = 0.95 * 1e27; //usage ratio of 95%
 
   /**
@@ -64,7 +67,7 @@ library ValidationLogic {
     mapping(address => DataTypes.ReserveData) storage reservesData,
     DataTypes.UserConfigurationMap storage userConfig,
     mapping(uint256 => address) storage reserves,
-    uint256 reservesCount,
+    uint256 reservesCount, //Just so we dont iterate more than we need to when calcing users total debt/collat/threshold/ltv
     address oracle
   ) external view {
     require(amount != 0, Errors.VL_INVALID_AMOUNT);
@@ -144,6 +147,7 @@ library ValidationLogic {
     require(vars.borrowingEnabled, Errors.VL_BORROWING_NOT_ENABLED);
 
     //validate interest rate mode
+    //So if its none this reverts? So None essentially means borrow disabled
     require(
       uint256(DataTypes.InterestRateMode.VARIABLE) == interestRateMode ||
         uint256(DataTypes.InterestRateMode.STABLE) == interestRateMode,
@@ -154,7 +158,7 @@ library ValidationLogic {
       vars.userCollateralBalanceETH,
       vars.userBorrowBalanceETH,
       vars.currentLtv,
-      vars.currentLiquidationThreshold,
+      vars.currentLiquidationThreshold, //Weighted sum of thresholds of collat reserves based on user balance
       vars.healthFactor
     ) = GenericLogic.calculateUserAccountData(
       userAddress,
@@ -165,6 +169,7 @@ library ValidationLogic {
       oracle
     );
 
+    //Is this really necessary?
     require(vars.userCollateralBalanceETH > 0, Errors.VL_COLLATERAL_BALANCE_IS_0);
 
     require(
@@ -195,10 +200,17 @@ library ValidationLogic {
 
       require(vars.stableRateBorrowingEnabled, Errors.VL_STABLE_BORROWING_NOT_ENABLED);
 
+      //Requires one of 3 to be true to not revert?
+      //Experimented, this is definitely doing what it just looks like. Only one of 3 need to be true
+      //Check 2 should autopass if check 1 passes right? Curious why to have both.
+      //I think all these make sense now though. If the user is using as not using this reserve as collat,
+      //if using as collat is disabled on this reserve, if the amount to borrow is greater than the users collat in this reserve
+      //(Collateralizing does whole reserve at one right, cant collateralize part of a reserve? I think so.)
+      //Also not this check is only for stable borrows (Which exactly line up with the logic in the whitepaper)
       require(
         !userConfig.isUsingAsCollateral(reserve.id) ||
-          reserve.configuration.getLtv() == 0 ||
-          amount > IERC20(reserve.aTokenAddress).balanceOf(userAddress),
+          reserve.configuration.getLtv() == 0 || //LTV of 0 means that users cannot use the reserve as collaterall. So they couldnt be using this reserve as collat
+          amount > IERC20(reserve.aTokenAddress).balanceOf(userAddress), //This is the check they referenced in the whitepaper
         Errors.VL_COLLATERAL_SAME_AS_BORROWING_CURRENCY
       );
 
@@ -206,6 +218,10 @@ library ValidationLogic {
 
       //calculate the max available loan size in stable rate mode as a percentage of the
       //available liquidity
+      //Interesting, what?
+      //One *Stable loan cannot exceed a certain percentage of the total available funds? Interesting
+      //Also why available liquidity and not total funds I wonder.
+      //I guess some loans could be really long lasting?
       uint256 maxLoanSizeStable = vars.availableLiquidity.percentMul(maxStableLoanPercent);
 
       require(amount <= maxLoanSizeStable, Errors.VL_AMOUNT_BIGGER_THAN_MAX_LOAN_SIZE_STABLE);
@@ -236,14 +252,14 @@ library ValidationLogic {
 
     require(
       (stableDebt > 0 &&
-        DataTypes.InterestRateMode(rateMode) == DataTypes.InterestRateMode.STABLE) ||
+        DataTypes.InterestRateMode(rateMode) == DataTypes.InterestRateMode.STABLE) || //Why are we casting here? DataTypes.InterestRateMode(rateMode)
         (variableDebt > 0 &&
           DataTypes.InterestRateMode(rateMode) == DataTypes.InterestRateMode.VARIABLE),
       Errors.VL_NO_DEBT_OF_SELECTED_TYPE
     );
 
     require(
-      amountSent != uint256(-1) || msg.sender == onBehalfOf,
+      amountSent != uint256(-1) || msg.sender == onBehalfOf, //wtf, wtf indeed. I guess max unit means full payoff? If so then why ignore a user paying for themselves in that case. Someone can pay off someone elses debt if they fully pay it off? Maybe for protocol fees axing bad debt?
       Errors.VL_NO_EXPLICIT_AMOUNT_TO_REPAY_ON_BEHALF
     );
   }
@@ -281,12 +297,15 @@ library ValidationLogic {
        **/
       require(stableRateEnabled, Errors.VL_STABLE_BORROWING_NOT_ENABLED);
 
+      //Same check as before. Code reuse so bad smh wow
       require(
         !userConfig.isUsingAsCollateral(reserve.id) ||
           reserve.configuration.getLtv() == 0 ||
           stableDebt.add(variableDebt) > IERC20(reserve.aTokenAddress).balanceOf(msg.sender),
         Errors.VL_COLLATERAL_SAME_AS_BORROWING_CURRENCY
       );
+
+      //Not gonna check max stable borrow in one loan amount though? Then if I wanted that couldnt I just borrow variable, swap to stable and get a bigger loan than they wanted me to?
     } else {
       revert(Errors.VL_INVALID_INTEREST_RATE_MODE_SELECTED);
     }
@@ -324,10 +343,11 @@ library ValidationLogic {
     uint256 maxVariableBorrowRate =
       IReserveInterestRateStrategy(reserve.interestRateStrategyAddress).getMaxVariableBorrowRate();
 
+    //So useage has to be above 95%, and rate has to be BELOW 40% (Average rate across all users)
     require(
       usageRatio >= REBALANCE_UP_USAGE_RATIO_THRESHOLD &&
         currentLiquidityRate <=
-        maxVariableBorrowRate.percentMul(REBALANCE_UP_LIQUIDITY_RATE_THRESHOLD),
+        maxVariableBorrowRate.percentMul(REBALANCE_UP_LIQUIDITY_RATE_THRESHOLD), //Docs say this should be 25 buts its 40
       Errors.LP_INTEREST_RATE_REBALANCE_CONDITIONS_NOT_MET
     );
   }
@@ -389,6 +409,9 @@ library ValidationLogic {
    * @param userStableDebt Total stable debt balance of the user
    * @param userVariableDebt Total variable debt balance of the user
    **/
+
+  //Note we are not reverting, instead returning an error code, unlike the other functions so far in this file
+  //I wonder why this is? What is different about validating a liquidation call where we want handling reverting one level up?
   function validateLiquidationCall(
     DataTypes.ReserveData storage collateralReserve,
     DataTypes.ReserveData storage principalReserve,
@@ -398,6 +421,7 @@ library ValidationLogic {
     uint256 userVariableDebt
   ) internal view returns (uint256, string memory) {
     if (
+      //Just active not frozen since frozen liquidations, withdraws, repayments can happen (I believe those 3)
       !collateralReserve.configuration.getActive() || !principalReserve.configuration.getActive()
     ) {
       return (
@@ -413,6 +437,8 @@ library ValidationLogic {
       );
     }
 
+    //Liquidation threshold is used as a psuedo collateral enabled flag by setting it to 0. Save space!
+    //So can admin just disable collateralEnabled on a reserve and prevent everyone from getting liquidated? Seems dangerous if so
     bool isCollateralEnabled =
       collateralReserve.configuration.getLiquidationThreshold() > 0 &&
         userConfig.isUsingAsCollateral(collateralReserve.id);
@@ -443,6 +469,9 @@ library ValidationLogic {
    * @param reserves The addresses of all the active reserves
    * @param oracle The price oracle
    */
+  //Interesting, I assume atoken calls this?
+  //Also, seems this is called after state changes are done to atoken, meaning we dont have to calculate anything.
+  //And state gets undone on revert.
   function validateTransfer(
     address from,
     mapping(address => DataTypes.ReserveData) storage reservesData,

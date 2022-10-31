@@ -78,6 +78,7 @@ contract AToken is
       chainId := chainid()
     }
 
+    //Makes sure signatures for permit are intended for exactly this application
     DOMAIN_SEPARATOR = keccak256(
       abi.encode(
         EIP712_DOMAIN,
@@ -188,6 +189,7 @@ contract AToken is
    * @param to The recipient
    * @param value The amount of tokens getting transferred
    **/
+  //Its own function so we can set the validate flag to false
   function transferOnLiquidation(
     address from,
     address to,
@@ -273,7 +275,7 @@ contract AToken is
   /**
    * @dev Returns the address of the underlying asset of this aToken (E.g. WETH for aWETH)
    **/
-  function UNDERLYING_ASSET_ADDRESS() public override view returns (address) {
+  function UNDERLYING_ASSET_ADDRESS() public view override returns (address) {
     return _underlyingAsset;
   }
 
@@ -367,6 +369,7 @@ contract AToken is
    * @param amount The amount getting transferred
    * @param validate `true` if the transfer needs to be validated
    **/
+  //Interesting we have the validate parameter. I guess we dont validate on a liquidation probably?
   function _transfer(
     address from,
     address to,
@@ -384,6 +387,8 @@ contract AToken is
     super._transfer(from, to, amount.rayDiv(index));
 
     if (validate) {
+      //This eventually calls into the validation logic for validateTransfer. I guess thats a library with internal, so we couldnt call it directly from another contract
+      //All the validation logic does is check the health factor is ok after transfer
       pool.finalizeTransfer(underlyingAsset, from, to, amount, fromBalanceBefore, toBalanceBefore);
     }
 

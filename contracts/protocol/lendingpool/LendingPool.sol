@@ -35,7 +35,8 @@ import {LendingPoolStorage} from './LendingPoolStorage.sol';
  *   # Borrow
  *   # Repay
  *   # Swap their loans between variable and stable rate
- *   # Enable/disable their deposits as collateral rebalance stable rate borrow positions
+ *   # Enable/disable their deposits as collateral
+ *   # rebalance stable rate borrow positions
  *   # Liquidate positions
  *   # Execute Flash Loans
  * - To be covered by a proxy contract, owned by the LendingPoolAddressesProvider of the specific market
@@ -86,7 +87,7 @@ contract LendingPool is VersionedInitializable, ILendingPool, LendingPoolStorage
   function initialize(ILendingPoolAddressesProvider provider) public initializer {
     _addressesProvider = provider;
     _maxStableRateBorrowSizePercent = 2500;
-    _flashLoanPremiumTotal = 9;
+    _flashLoanPremiumTotal = 9; //9 / 10000 so .09%
     _maxNumberOfReserves = 128;
   }
 
@@ -113,7 +114,7 @@ contract LendingPool is VersionedInitializable, ILendingPool, LendingPoolStorage
 
     address aToken = reserve.aTokenAddress;
 
-    reserve.updateState();
+    reserve.updateState(); //Update indexes BEFORE or amounts of liquidity for last period will be invalid
     reserve.updateInterestRates(asset, aToken, amount, 0);
 
     IERC20(asset).safeTransferFrom(msg.sender, aToken, amount);
@@ -121,7 +122,8 @@ contract LendingPool is VersionedInitializable, ILendingPool, LendingPoolStorage
     bool isFirstDeposit = IAToken(aToken).mint(onBehalfOf, amount, reserve.liquidityIndex);
 
     if (isFirstDeposit) {
-      _usersConfig[onBehalfOf].setUsingAsCollateral(reserve.id, true);
+      //If collaterall is disabled, does it just ignore this asset even if using as collateral is true?
+      _usersConfig[onBehalfOf].setUsingAsCollateral(reserve.id, true); //Automacially set collateral as true? But what if reserve has using as collateral disabled?
       emit ReserveUsedAsCollateralEnabled(asset, onBehalfOf);
     }
 
@@ -167,7 +169,7 @@ contract LendingPool is VersionedInitializable, ILendingPool, LendingPoolStorage
       _addressesProvider.getPriceOracle()
     );
 
-    reserve.updateState();
+    reserve.updateState(); //Update state before doing an action, aka add interest on the existing balance from time period BEFORE
 
     reserve.updateInterestRates(asset, aToken, 0, amountToWithdraw);
 
@@ -261,15 +263,16 @@ contract LendingPool is VersionedInitializable, ILendingPool, LendingPoolStorage
       paybackAmount = amount;
     }
 
-    reserve.updateState();
+    reserve.updateState(); //Add that inte
 
     if (interestRateMode == DataTypes.InterestRateMode.STABLE) {
       IStableDebtToken(reserve.stableDebtTokenAddress).burn(onBehalfOf, paybackAmount);
     } else {
+      //Variable burn takes an extra param, variable borrow index. To calculate real vs scaled amounts
       IVariableDebtToken(reserve.variableDebtTokenAddress).burn(
         onBehalfOf,
         paybackAmount,
-        reserve.variableBorrowIndex
+        reserve.variableBorrowIndex //Gotta always pass this since all balances depend on it
       );
     }
 
@@ -282,7 +285,8 @@ contract LendingPool is VersionedInitializable, ILendingPool, LendingPoolStorage
 
     IERC20(asset).safeTransferFrom(msg.sender, aToken, paybackAmount);
 
-    IAToken(aToken).handleRepayment(msg.sender, paybackAmount);
+    //Looks like this function is empty in atoken contract, interesting. Can do actions on repayment if you want I guess in fork/ if aave upgrades
+    IAToken(aToken).handleRepayment(msg.sender, paybackAmount); //wut
 
     emit Repay(asset, onBehalfOf, msg.sender, paybackAmount);
 
@@ -301,6 +305,7 @@ contract LendingPool is VersionedInitializable, ILendingPool, LendingPoolStorage
 
     DataTypes.InterestRateMode interestRateMode = DataTypes.InterestRateMode(rateMode);
 
+    //These fuckers with one of them returning and most of them reverting aaaa
     ValidationLogic.validateSwapRateMode(
       reserve,
       _usersConfig[msg.sender],
@@ -311,11 +316,12 @@ contract LendingPool is VersionedInitializable, ILendingPool, LendingPoolStorage
 
     reserve.updateState();
 
+    //Oh just burn and mint the whole debt, and the burn and mint handle token rate logic (not interest rate updates)
     if (interestRateMode == DataTypes.InterestRateMode.STABLE) {
       IStableDebtToken(reserve.stableDebtTokenAddress).burn(msg.sender, stableDebt);
       IVariableDebtToken(reserve.variableDebtTokenAddress).mint(
         msg.sender,
-        msg.sender,
+        msg.sender, //Msg.sender twice because we have borrow alowances, so onbehalfOf and user might be different in borrows
         stableDebt,
         reserve.variableBorrowIndex
       );
@@ -327,12 +333,13 @@ contract LendingPool is VersionedInitializable, ILendingPool, LendingPoolStorage
       );
       IStableDebtToken(reserve.stableDebtTokenAddress).mint(
         msg.sender,
-        msg.sender,
+        msg.sender, //Msg.sender twice because we have borrow alowances, so onbehalfOf and user might be different in borrows
         variableDebt,
         reserve.currentStableBorrowRate
       );
     }
 
+    //Then update the rates with the strategy
     reserve.updateInterestRates(asset, reserve.aTokenAddress, 0, 0);
 
     emit Swap(asset, msg.sender, rateMode);
@@ -360,7 +367,7 @@ contract LendingPool is VersionedInitializable, ILendingPool, LendingPoolStorage
       reserve,
       asset,
       stableDebtToken,
-      variableDebtToken,
+      variableDebtToken, //Total debt needs to be above 95% utilization, not just stable. So need to know variable debt too for 95% utilization check
       aTokenAddress
     );
 
@@ -384,6 +391,7 @@ contract LendingPool is VersionedInitializable, ILendingPool, LendingPoolStorage
    * @param asset The address of the underlying asset deposited
    * @param useAsCollateral `true` if the user wants to use the deposit as collateral, `false` otherwise
    **/
+  //Since everything gets enabled as collateral by default, first move of people using this will probs be unuse an asset as collateral
   function setUserUseReserveAsCollateral(address asset, bool useAsCollateral)
     external
     override
@@ -391,7 +399,7 @@ contract LendingPool is VersionedInitializable, ILendingPool, LendingPoolStorage
   {
     DataTypes.ReserveData storage reserve = _reserves[asset];
 
-    ValidationLogic.validateSetUseReserveAsCollateral(
+    ValidationLogic.validateSetUseReserveAsCollateral( //Basically if removing from collateral check health factor
       reserve,
       asset,
       useAsCollateral,
@@ -422,6 +430,7 @@ contract LendingPool is VersionedInitializable, ILendingPool, LendingPoolStorage
    * @param receiveAToken `true` if the liquidators wants to receive the collateral aTokens, `false` if he wants
    * to receive the underlying collateral asset directly
    **/
+  //Fuck the spurious dragon, call another implementation for logic
   function liquidationCall(
     address collateralAsset,
     address debtAsset,
@@ -448,6 +457,7 @@ contract LendingPool is VersionedInitializable, ILendingPool, LendingPoolStorage
 
     (uint256 returnCode, string memory returnMessage) = abi.decode(result, (uint256, string));
 
+    //Because most errors from liquidation produce an integer instead of directly reverting
     require(returnCode == 0, string(abi.encodePacked(returnMessage)));
   }
 
@@ -480,6 +490,7 @@ contract LendingPool is VersionedInitializable, ILendingPool, LendingPoolStorage
    * @param referralCode Code used to register the integrator originating the operation, for potential rewards.
    *   0 if the action is executed directly by the user, without any middle-man
    **/
+  // ooga booga variadic im so smart. Just say arbitrary so ppl understand u
   function flashLoan(
     address receiverAddress,
     address[] calldata assets,
@@ -491,7 +502,7 @@ contract LendingPool is VersionedInitializable, ILendingPool, LendingPoolStorage
   ) external override whenNotPaused {
     FlashLoanLocalVars memory vars;
 
-    ValidationLogic.validateFlashloan(assets, amounts);
+    ValidationLogic.validateFlashloan(assets, amounts); //literally just checks the lengths
 
     address[] memory aTokenAddresses = new address[](assets.length);
     uint256[] memory premiums = new uint256[](assets.length);
@@ -519,15 +530,16 @@ contract LendingPool is VersionedInitializable, ILendingPool, LendingPoolStorage
       vars.currentAmountPlusPremium = vars.currentAmount.add(vars.currentPremium);
 
       if (DataTypes.InterestRateMode(modes[vars.i]) == DataTypes.InterestRateMode.NONE) {
+        //If user says just revert
         _reserves[vars.currentAsset].updateState();
         _reserves[vars.currentAsset].cumulateToLiquidityIndex(
           IERC20(vars.currentATokenAddress).totalSupply(),
           vars.currentPremium
-        );
+        ); //Adds extra money not from normal interest, adds to liquidity index so its essentially spread across all users
         _reserves[vars.currentAsset].updateInterestRates(
           vars.currentAsset,
           vars.currentATokenAddress,
-          vars.currentAmountPlusPremium,
+          vars.currentAmountPlusPremium, //No because right now those tokens are not in the atoken contract. NO ~~shouldnt this be just the premium since the amount was already in the pool?~~
           0
         );
 
@@ -537,6 +549,7 @@ contract LendingPool is VersionedInitializable, ILendingPool, LendingPoolStorage
           vars.currentAmountPlusPremium
         );
       } else {
+        //If user says open a borrow after. Decided on per asset, so could b 1/10 assets
         // If the user chose to not return the funds, the system checks if there is enough collateral and
         // eventually opens a debt position
         _executeBorrow(
@@ -713,7 +726,7 @@ contract LendingPool is VersionedInitializable, ILendingPool, LendingPoolStorage
   }
 
   /**
-   * @dev Returns the fee on flash loans 
+   * @dev Returns the fee on flash loans
    */
   function FLASHLOAN_PREMIUM_TOTAL() public view returns (uint256) {
     return _flashLoanPremiumTotal;
@@ -746,7 +759,7 @@ contract LendingPool is VersionedInitializable, ILendingPool, LendingPoolStorage
   ) external override whenNotPaused {
     require(msg.sender == _reserves[asset].aTokenAddress, Errors.LP_CALLER_MUST_BE_AN_ATOKEN);
 
-    ValidationLogic.validateTransfer(
+    ValidationLogic.validateTransfer( //checks health factor on loosing collateral
       from,
       _reserves,
       _usersConfig[from],
@@ -758,6 +771,7 @@ contract LendingPool is VersionedInitializable, ILendingPool, LendingPoolStorage
     uint256 reserveId = _reserves[asset].id;
 
     if (from != to) {
+      //wtf why
       if (balanceFromBefore.sub(amount) == 0) {
         DataTypes.UserConfigurationMap storage fromConfig = _usersConfig[from];
         fromConfig.setUsingAsCollateral(reserveId, false);
@@ -790,8 +804,8 @@ contract LendingPool is VersionedInitializable, ILendingPool, LendingPoolStorage
     address interestRateStrategyAddress
   ) external override onlyLendingPoolConfigurator {
     require(Address.isContract(asset), Errors.LP_NOT_CONTRACT);
-    _reserves[asset].init(
-      aTokenAddress,
+    _reserves[asset].init( //Super psuedo object orient thing going on here, reserves[asset] is a datatype, but since we have the library we can call the init function on it essentially. But this pretty much object oriented for most purposes
+      aTokenAddress, //Configurator seems able to deploy new atokens n stuff
       stableDebtAddress,
       variableDebtAddress,
       interestRateStrategyAddress
@@ -902,6 +916,7 @@ contract LendingPool is VersionedInitializable, ILendingPool, LendingPoolStorage
     }
 
     if (isFirstBorrowing) {
+      //I guess the condition reduces gas by not modifying storage to same value if already borrowing
       userConfig.setBorrowing(reserve.id, true);
     }
 
@@ -909,9 +924,12 @@ contract LendingPool is VersionedInitializable, ILendingPool, LendingPoolStorage
       vars.asset,
       vars.aTokenAddress,
       0,
-      vars.releaseUnderlying ? vars.amount : 0
+      vars.releaseUnderlying ? vars.amount : 0 //Because in case of flashloan, tokens are already in users contract and not in the atoken contract, thus utilization needs to be calced accordingly
     );
 
+    //This exists just as a check for flashloans. If a user cannot repay a flashloans and enables a flag, system tries to automatically create a borrow position for
+    //flashloan debt. In the case of regular borrows, release underlying will always be true, while if a flashloan is creating a borrow position, user has already
+    //received the tokens, do you dont want to double pay them
     if (vars.releaseUnderlying) {
       IAToken(vars.aTokenAddress).transferUnderlyingTo(vars.user, vars.amount);
     }
@@ -932,7 +950,7 @@ contract LendingPool is VersionedInitializable, ILendingPool, LendingPoolStorage
   function _addReserveToList(address asset) internal {
     uint256 reservesCount = _reservesCount;
 
-    require(reservesCount < _maxNumberOfReserves, Errors.LP_NO_MORE_RESERVES_ALLOWED);
+    require(reservesCount < _maxNumberOfReserves, Errors.LP_NO_MORE_RESERVES_ALLOWED); //cant overflow that user data bitmap lmao
 
     bool reserveAlreadyAdded = _reserves[asset].id != 0 || _reservesList[0] == asset;
 

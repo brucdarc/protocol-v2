@@ -11,7 +11,7 @@ import {DataTypes} from '../types/DataTypes.sol';
  */
 library UserConfiguration {
   uint256 internal constant BORROWING_MASK =
-    0x5555555555555555555555555555555555555555555555555555555555555555;
+    0x5555555555555555555555555555555555555555555555555555555555555555; //01010101010101010101 ect.
 
   /**
    * @dev Sets if the user is borrowing the reserve identified by reserveIndex

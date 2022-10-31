@@ -60,6 +60,7 @@ contract LendingPoolConfigurator is VersionedInitializable, ILendingPoolConfigur
   /**
    * @dev Initializes reserves in batch
    **/
+  //Stores this struct in the interface because it needs to be able to declare it as an input parameter
   function batchInitReserve(InitReserveInput[] calldata input) external onlyPoolAdmin {
     ILendingPool cachedPool = pool;
     for (uint256 i = 0; i < input.length; i++) {
@@ -151,7 +152,8 @@ contract LendingPoolConfigurator is VersionedInitializable, ILendingPoolConfigur
 
     (, , , uint256 decimals, ) = cachedPool.getConfiguration(input.asset).getParamsMemory();
 
-    bytes memory encodedCall = abi.encodeWithSelector(
+    bytes memory encodedCall =
+      abi.encodeWithSelector(
         IInitializableAToken.initialize.selector,
         cachedPool,
         input.treasury,
@@ -163,11 +165,7 @@ contract LendingPoolConfigurator is VersionedInitializable, ILendingPoolConfigur
         input.params
       );
 
-    _upgradeTokenImplementation(
-      reserveData.aTokenAddress,
-      input.implementation,
-      encodedCall
-    );
+    _upgradeTokenImplementation(reserveData.aTokenAddress, input.implementation, encodedCall);
 
     emit ATokenUpgraded(input.asset, reserveData.aTokenAddress, input.implementation);
   }
@@ -179,10 +177,11 @@ contract LendingPoolConfigurator is VersionedInitializable, ILendingPoolConfigur
     ILendingPool cachedPool = pool;
 
     DataTypes.ReserveData memory reserveData = cachedPool.getReserveData(input.asset);
-     
+
     (, , , uint256 decimals, ) = cachedPool.getConfiguration(input.asset).getParamsMemory();
 
-    bytes memory encodedCall = abi.encodeWithSelector(
+    bytes memory encodedCall =
+      abi.encodeWithSelector(
         IInitializableDebtToken.initialize.selector,
         cachedPool,
         input.asset,
@@ -209,17 +208,15 @@ contract LendingPoolConfigurator is VersionedInitializable, ILendingPoolConfigur
   /**
    * @dev Updates the variable debt token implementation for the asset
    **/
-  function updateVariableDebtToken(UpdateDebtTokenInput calldata input)
-    external
-    onlyPoolAdmin
-  {
+  function updateVariableDebtToken(UpdateDebtTokenInput calldata input) external onlyPoolAdmin {
     ILendingPool cachedPool = pool;
 
     DataTypes.ReserveData memory reserveData = cachedPool.getReserveData(input.asset);
 
     (, , , uint256 decimals, ) = cachedPool.getConfiguration(input.asset).getParamsMemory();
 
-    bytes memory encodedCall = abi.encodeWithSelector(
+    bytes memory encodedCall =
+      abi.encodeWithSelector(
         IInitializableDebtToken.initialize.selector,
         cachedPool,
         input.asset,
@@ -248,12 +245,15 @@ contract LendingPoolConfigurator is VersionedInitializable, ILendingPoolConfigur
    * @param asset The address of the underlying asset of the reserve
    * @param stableBorrowRateEnabled True if stable borrow rate needs to be enabled by default on this reserve
    **/
+  //Also used to set stable borrowing enabled
   function enableBorrowingOnReserve(address asset, bool stableBorrowRateEnabled)
     external
     onlyPoolAdmin
   {
     DataTypes.ReserveConfigurationMap memory currentConfig = pool.getConfiguration(asset);
 
+    //This operation is really doing bit operations math, but because of our ReserveConfiguration for DataTypes.ReserveConfigurationMap; we can just call a readable function
+    //Amazing!
     currentConfig.setBorrowingEnabled(true);
     currentConfig.setStableRateBorrowingEnabled(stableBorrowRateEnabled);
 
@@ -305,8 +305,12 @@ contract LendingPoolConfigurator is VersionedInitializable, ILendingPoolConfigur
         Errors.LPC_INVALID_CONFIGURATION
       );
 
-      //if threshold * bonus is less than PERCENTAGE_FACTOR, it's guaranteed that at the moment
+      //if threshold * bonus is less than 100.00%, it's guaranteed that at the moment
       //a loan is taken there is enough collateral available to cover the liquidation bonus
+      //Aka dont let the liquidation produce more value to the liquidator than the loan can have as collateral
+      //At the first point liquidation becomes available
+      //(Obviously if something goes unliquidated while the market changes bad debt can occur)
+      //This is essententially a dont let the debt start to go bad by eating at the liquidation bonus by having at max threshold + bonus equal to 100% of the collat
       require(
         liquidationThreshold.percentMul(liquidationBonus) <= PercentageMath.PERCENTAGE_FACTOR,
         Errors.LPC_INVALID_CONFIGURATION
@@ -420,6 +424,7 @@ contract LendingPoolConfigurator is VersionedInitializable, ILendingPoolConfigur
    * @param asset The address of the underlying asset of the reserve
    * @param reserveFactor The new reserve factor of the reserve
    **/
+  //dang you can just make this bitch 100% if you want. 150%? 200%? More than 100% probably reverts to underflow
   function setReserveFactor(address asset, uint256 reserveFactor) external onlyPoolAdmin {
     DataTypes.ReserveConfigurationMap memory currentConfig = pool.getConfiguration(asset);
 
@@ -455,6 +460,11 @@ contract LendingPoolConfigurator is VersionedInitializable, ILendingPoolConfigur
     internal
     returns (address)
   {
+    //This is a constructor call not a cast!
+    //Passing address this to set admin to this contract
+    //Welcome to immutable proxy
+    //So this contract will be the admin of the token implementations for the reserves
+    //and therefore is responsible for upgrading them if they need upgrading in the future
     InitializableImmutableAdminUpgradeabilityProxy proxy =
       new InitializableImmutableAdminUpgradeabilityProxy(address(this));
 
